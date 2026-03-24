@@ -208,3 +208,19 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+#Healthy mode
+HealthyMode/*.iml
+HealthyMode/.gradle
+HealthyMode/local.properties
+HealthyMode/.idea/caches
+HealthyMode/.idea/libraries
+HealthyMode/.idea/modules.xml
+HealthyMode/.idea/workspace.xml
+HealthyMode/.idea/navEditor.xml
+HealthyMode/.idea/assetWizardSettings.xml
+HealthyMode/.DS_Store
+HealthyMode/build
+HealthyMode/captures
+HealthyMode/.externalNativeBuild
+HealthyMode/.cxx
+HealthyMode/local.properties

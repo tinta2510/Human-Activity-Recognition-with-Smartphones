@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "160940161867",
+    "project_id": "healthymode-9f079842",
+    "storage_bucket": "healthymode-9f079842.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:160940161867:android:cb233b8ccc26c81b1cc6ce",
+        "android_client_info": {
+          "package_name": "com.example.HealthyMode"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyBEEb3fFL98wr8xmxMmPHvd2kt9PCRBqEQ"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
