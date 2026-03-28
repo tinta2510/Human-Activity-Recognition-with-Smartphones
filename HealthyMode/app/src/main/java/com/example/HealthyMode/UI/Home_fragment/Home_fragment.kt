@@ -3,31 +3,18 @@ package com.example.HealthyMode.UI.Home_fragment
 import android.annotation.SuppressLint
 import android.app.Dialog
 import android.content.Context
-import android.content.Intent
 import android.content.SharedPreferences
-import android.graphics.Color
-import android.hardware.SensorManager
 import android.os.Build
 import android.os.Bundle
 import android.os.Handler
-import android.util.Log
+import android.os.Looper
 import android.view.LayoutInflater
 import android.view.View
 import android.view.ViewGroup
 import android.widget.*
 import androidx.annotation.RequiresApi
-import androidx.appcompat.widget.AppCompatButton
-import androidx.constraintlayout.widget.ConstraintLayout
-import androidx.core.app.ActivityCompat.*
 import androidx.fragment.app.Fragment
-import androidx.lifecycle.ViewModelProvider
-import com.airbnb.lottie.LottieAnimationView
 import com.example.HealthyMode.R
-import com.example.HealthyMode.UI.Food.Add_food
-import com.example.HealthyMode.UI.Food.Food_track
-import com.example.HealthyMode.UI.Food.ViewModel.Food_ViewModel
-import com.example.HealthyMode.UI.Reminder.MealReminder
-import com.example.HealthyMode.UI.weight.weight_track
 import com.example.HealthyMode.Utils.Constant
 import com.example.HealthyMode.databinding.FragmentHomeFragmentBinding
 import com.google.firebase.auth.FirebaseAuth
@@ -35,353 +22,186 @@ import com.google.firebase.firestore.DocumentReference
 import com.google.firebase.firestore.ktx.firestore
 import com.google.firebase.ktx.Firebase
 import dagger.hilt.android.AndroidEntryPoint
-import java.time.LocalDate
 import java.util.*
-import kotlin.math.abs
-import kotlin.math.round
 
 @AndroidEntryPoint
-@Suppress("SENSELESS_COMPARISON")
 @RequiresApi(Build.VERSION_CODES.O)
-class Home_fragment : Fragment() {
-    private var sensorManager: SensorManager? = null
-    private var no_glass: Int? = null
-    private val handler = Handler()
-    private lateinit var dialog: Dialog
+class Home_fragment : Fragment(), SharedPreferences.OnSharedPreferenceChangeListener {
+
     private lateinit var binding: FragmentHomeFragmentBinding
-    var userDitails: DocumentReference = Firebase.firestore.collection("user").document(
-        FirebaseAuth.getInstance().currentUser!!.uid.toString()
+    private lateinit var dialog: Dialog
+    private val handler = Handler(Looper.getMainLooper())
+
+    // The shared preferences file where your teammate will save the data
+    private lateinit var activityPrefs: SharedPreferences
+
+    private var userDitails: DocumentReference = Firebase.firestore.collection("user").document(
+        FirebaseAuth.getInstance().currentUser?.uid ?: ""
     )
 
-    @RequiresApi(Build.VERSION_CODES.O)
-    private var curr_date: String = LocalDate.now().toString()
-    private val updatetimeRunnable = object : Runnable {
-        @RequiresApi(Build.VERSION_CODES.O)
-        @SuppressLint("SimpleDateFormat")
+    // --- THE CONTRACT KEYS ---
+    // You and your teammate must use exactly these keys to save and load data
+    companion object {
+        const val PREFS_NAME = "ActivityDataPrefs"
+        const val KEY_WALK = "walk_count"
+        const val KEY_UPSTAIR = "upstair_count"
+        const val KEY_DOWNSTAIR = "downstair_count"
+        const val KEY_SITTING = "sitting_hrs"
+        const val KEY_LAYING = "laying_hrs"
+        const val KEY_SLEEPING = "sleeping_hrs"
+    }
+
+    private val generalUIRunnable = object : Runnable {
         override fun run() {
-            stepCounter()
             greeting_class()
             if (!Constant.isInternetOn(requireContext())) {
                 binding.net.visibility = View.VISIBLE
             } else {
                 binding.net.visibility = View.GONE
             }
-            handler.postDelayed(this, 1000)
+            handler.postDelayed(this, 60000) // Update every minute
         }
-
     }
 
-    @SuppressLint("SuspiciousIndentation", "CutPasteId")
     override fun onCreateView(
         inflater: LayoutInflater, container: ViewGroup?,
         savedInstanceState: Bundle?
-    ): View? {
+    ): View {
         binding = FragmentHomeFragmentBinding.inflate(inflater, container, false)
-        handler.post(updatetimeRunnable)
-//        try {
-            dialog = Dialog(requireActivity())
-            userDitails.addSnapshotListener { value, error ->
-                if (error != null) {
-                    return@addSnapshotListener
-                }
-                if (value != null && value.exists()) {
-                    binding.name.text = value.data!!["fullname"].toString()
-                }
-            }
-        set_target()
-            existwater()
-            addwater()
-            addfood()
-            addTarget()
-            binding.apply {
-                weightButton.setOnClickListener {
-                startActivity(Intent(requireActivity(), weight_track::class.java))
-            }
-                mealrem.setOnClickListener {
-                    startActivity(Intent(requireActivity(), MealReminder::class.java))
-                }
-                circularProgressBar.setOnClickListener {
-                    Toast.makeText(activity, "Long tap to reset steps", Toast.LENGTH_SHORT).show()
-                }
-                circularProgressBar.setOnLongClickListener {
-                    reset()
-                    true
-                }
-                foodNut.setOnClickListener {
-                    startActivity(Intent(requireActivity(),Food_track::class.java))
-                }
-            }
+        dialog = Dialog(requireActivity())
 
-//            var cpbar = binding.circularProgressBar
-////            reset step counter
-//            try {
-//                cpbar.setOnClickListener {
-//                    Toast.makeText(activity, "Long tap to reset steps", Toast.LENGTH_SHORT).show()
-//                }
-//                cpbar.setOnLongClickListener {
-//                    reset()
-//                    true
-//                }
-//
-//            } catch (e: Exception) {
-//                Toast.makeText(activity, e.message, Toast.LENGTH_SHORT).show()
-//            }
-            ////////////////////////////////////////////
+        // Initialize SharedPreferences
+        activityPrefs = requireActivity().getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
+        // Load User Name
+        userDitails.addSnapshotListener { value, error ->
+            if (error != null) return@addSnapshotListener
+            if (value != null && value.exists()) {
+                binding.name.text = value.data?.get("fullname")?.toString() ?: ""
+            }
+        }
 
-//        } catch (e: Exception) {
-//            Toast.makeText(activity, e.message, Toast.LENGTH_SHORT).show()
-//        }
-        sensorManager = requireContext().getSystemService(Context.SENSOR_SERVICE) as SensorManager
+        setTargets()
+        generalUIRunnable.run()
+
         return binding.root
     }
 
-    ///////////////////////////////////////////////
+    override fun onResume() {
+        super.onResume()
+        // 1. When the user opens the app, fetch the latest data immediately
+        loadAllActivityData()
 
-    override fun onStart() {
-        super.onStart()
-        getenergy()
-        Getlatestweight()
+        // 2. Start listening in case the user leaves the app open and walks around
+        activityPrefs.registerOnSharedPreferenceChangeListener(this)
     }
 
-    // greeting user
+    override fun onPause() {
+        super.onPause()
+        // Stop listening when the app goes to the background to save battery
+        activityPrefs.unregisterOnSharedPreferenceChangeListener(this)
+    }
+
+    override fun onDestroyView() {
+        super.onDestroyView()
+        handler.removeCallbacks(generalUIRunnable)
+    }
+
+    // --- UI UPDATE LOGIC ---
+
+    // Triggered automatically if the Service updates SharedPreferences while the app is open
+    override fun onSharedPreferenceChanged(sharedPreferences: SharedPreferences?, key: String?) {
+        when (key) {
+            KEY_WALK -> updateWalkUI()
+            KEY_UPSTAIR -> updateUpstairUI()
+            KEY_DOWNSTAIR -> updateDownstairUI()
+            KEY_SITTING -> updateSittingUI()
+            KEY_LAYING -> updateLayingUI()
+            KEY_SLEEPING -> updateSleepingUI()
+        }
+    }
+
+    private fun loadAllActivityData() {
+        updateWalkUI()
+        updateUpstairUI()
+        updateDownstairUI()
+        updateSittingUI()
+        updateLayingUI()
+        updateSleepingUI()
+    }
+
+    private fun updateWalkUI() {
+        val count = activityPrefs.getInt(KEY_WALK, 0)
+        binding.walk.text = count.toString()
+        binding.circularProgressBarWalk.progress = count.toFloat()
+    }
+
+    private fun updateUpstairUI() {
+        val count = activityPrefs.getInt(KEY_UPSTAIR, 0)
+        binding.walkUpstair.text = count.toString()
+        binding.circularProgressBarUpstair.progress = count.toFloat()
+    }
+
+    private fun updateDownstairUI() {
+        val count = activityPrefs.getInt(KEY_DOWNSTAIR, 0)
+        binding.walkDownstair.text = count.toString()
+        binding.circularProgressBarDownstair.progress = count.toFloat()
+    }
+
+    @SuppressLint("SetTextI18n")
+    private fun updateSittingUI() {
+        val hrs = activityPrefs.getFloat(KEY_SITTING, 0f)
+        binding.sittingHrs.text = String.format("%.1f", hrs)
+        binding.sittingbar.progress = hrs
+    }
+
+    @SuppressLint("SetTextI18n")
+    private fun updateLayingUI() {
+        val hrs = activityPrefs.getFloat(KEY_LAYING, 0f)
+        binding.layingHrs.text = String.format("%.1f", hrs)
+        binding.layingbar.progress = hrs
+    }
+
+    @SuppressLint("SetTextI18n")
+    private fun updateSleepingUI() {
+        val hrs = activityPrefs.getFloat(KEY_SLEEPING, 0f)
+        binding.hrs.text = String.format("%.1f", hrs)
+        binding.sleepingbar.progress = hrs
+    }
+
+    private fun setTargets() {
+        val myPrefs = requireActivity().getSharedPreferences("myPrefs", Context.MODE_PRIVATE)
+        val target = myPrefs.getString("target", "1000") ?: "1000"
+
+        binding.circularProgressBarWalk.progressMax = target.toFloat()
+        binding.goal.text = target
+
+        binding.circularProgressBarUpstair.progressMax = 1000f
+        binding.goalUpstair.text = "1000"
+
+        binding.circularProgressBarDownstair.progressMax = 1000f
+        binding.goalDownstair.text = "1000"
+
+        binding.sittingbar.progressMax = 24f
+        binding.layingbar.progressMax = 24f
+        binding.sleepingbar.progressMax = 24f
+    }
+
     private fun greeting_class() {
         val time: ImageView = binding.weather
         val greeting: TextView = binding.greeting
-        val calendar = Calendar.getInstance()
-        val hour = calendar.get(Calendar.HOUR_OF_DAY)
+        val hour = Calendar.getInstance().get(Calendar.HOUR_OF_DAY)
 
-        if (hour.toInt() in 6..17) {
+        if (hour in 6..17) {
             time.setImageResource(R.drawable.sun)
-            if (hour.toInt() in 6..12) {
-                greeting.text = "Good Morning !"
-            }
-            if (hour.toInt() in 13..14) {
-                greeting.text = "Good Noon !"
-            } else if (hour.toInt() in 15..17) {
-                greeting.text = "Good Afternoon !"
+            greeting.text = when (hour) {
+                in 6..12 -> "Good Morning !"
+                in 13..14 -> "Good Noon !"
+                else -> "Good Afternoon !"
             }
         } else {
             time.setImageResource(R.drawable.moon)
-            if (hour.toInt() in 18..19) {
-                greeting.text = "Good Evening !"
-            } else {
-                greeting.text = "Good Night !"
-            }
+            greeting.text = if (hour in 18..19) "Good Evening !" else "Good Night !"
         }
-    }
-
-    override fun onDestroy() {
-        super.onDestroy()
-        handler.removeCallbacks(updatetimeRunnable)
-    }
-
-    //    control daily water intake
-    private fun addwater() {
-        userDitails.collection("water track").document(LocalDate.now().toString())
-            .addSnapshotListener { snapshot, e ->
-                if (e != null) {
-                    Log.w("TAG", "Listen failed", e)
-                    return@addSnapshotListener
-                }
-                if (snapshot != null && snapshot.exists()) {
-                    val glass: String = snapshot.data?.get("glass").toString()
-                    try {
-                        if (glass == "" || glass == null || glass.isEmpty()) {
-                            no_glass = 0
-                        } else no_glass = glass.toInt()
-                    } catch (_: Exception) {
-                        no_glass = 0
-                    }
-                } else {
-                    Log.d("TAG", "Current data null")
-                }
-            }
-
-        binding.addwater.setOnClickListener {
-            binding.deletewater.isClickable = true
-            binding.deletewater.setBackgroundResource(R.drawable.baseline_remove_circle_outline_24)
-            no_glass = no_glass?.plus(1)
-            val curr_date = LocalDate.now()
-            val water = mapOf(
-                "Date" to curr_date.toString(),
-                "glass" to no_glass.toString()
-            )
-            userDitails.collection("water track").document(curr_date.toString()).set(water)
-            if (no_glass == 10) {
-                val cong: LottieAnimationView = binding.animationView
-                cong.visibility = View.VISIBLE
-                binding.animationView2.visibility = View.VISIBLE
-                cong.playAnimation()
-                binding.animationView2.playAnimation()
-                Handler().postDelayed({
-                    cong.visibility = View.GONE
-                    cong.cancelAnimation()
-                    binding.animationView2.visibility = View.GONE
-                    binding.animationView2.cancelAnimation()
-                }, 2000)
-            }
-            updatewater()
-        }
-        val reduceWater: AppCompatButton = binding.deletewater
-        reduceWater.setOnClickListener {
-            if (binding.waterLevel.text.toString() == "0") {
-                binding.deletewater.isClickable = false
-                binding.deletewater.setBackgroundResource(R.drawable.disable_remove)
-            } else {
-                no_glass = no_glass?.minus(1)
-                val curr_date = LocalDate.now()
-                val water = mapOf(
-                    "Date" to curr_date.toString(),
-                    "glass" to no_glass.toString()
-                )
-                userDitails.collection("water track").document(curr_date.toString()).set(water)
-                updatewater()
-            }
-        }
-    }
-
-    // reset the steps
-    private fun reset() {
-        val pre_step =
-            Constant.loadData(requireContext(), "step_count", "total_step", "0")!!.toInt()
-        Constant.savedata(requireContext(), "step_count", "previous_step", pre_step.toString())
-        stepCounter()
-        dataupload("0", LocalDate.now().toString())
-    }
-
-    //    upload steps data in firestore
-    private fun dataupload(currsteps: String, curr_date: String) {
-        val steps = hashMapOf(
-            "steps" to currsteps.toString(),
-            "date" to curr_date.toString()
-        )
-        val curruser = FirebaseAuth.getInstance().currentUser!!.uid
-        Firebase.firestore.collection("user").document(curruser.toString())
-            .collection("steps").document(curr_date.toString()).set(steps)
-    }
-
-    private fun existwater() {
-        val curr_date = LocalDate.now()
-        val water = mapOf(
-            "Date" to curr_date.toString(),
-            "glass" to "0"
-        )
-        userDitails.collection("water track").document(curr_date.toString()).get()
-            .addOnSuccessListener { snapshot ->
-                if (!snapshot.exists()) {
-                    userDitails.collection("water track").document(curr_date.toString()).set(water)
-                    updatewater()
-                } else {
-                    updatewater()
-                }
-            }
-    }
-
-    //    update water level at UI textview
-    private fun updatewater() {
-        userDitails.collection("water track").document(curr_date.toString())
-            .addSnapshotListener { snapshot, e ->
-                if (e != null) {
-                    Log.w("TAG", "Listen failed", e)
-                    return@addSnapshotListener
-                }
-                if (snapshot != null && snapshot.exists()) {
-                    val gls = snapshot.data?.get("glass").toString()
-                    val water_level: TextView = binding.waterLevel
-                    water_level.text = gls.toString()
-                    val wt: ConstraintLayout = binding.content
-                }
-            }
-    }
-
-    //    add your daily meal
-    private fun addfood() {
-        binding.addFood.setOnClickListener {
-            val intent = Intent(activity, Add_food::class.java)
-            startActivity(intent)
-        }
-    }
-
-    fun set_target() {
-        val sharedPreferences: SharedPreferences =
-            requireActivity().getSharedPreferences("myPrefs", Context.MODE_PRIVATE)
-        val target = sharedPreferences.getString("target", "1000")
-        val cpbar = binding.circularProgressBar
-        cpbar.progressMax = target!!.toFloat()
-        binding.goal.text = target.toString()
-    }
-
-    fun stepCounter() {
-        val t_step = Constant.loadData(requireContext(), "step_count", "total_step", "0").toString()
-        val pre_step =
-            Constant.loadData(requireContext(), "step_count", "previous_step", "0").toString()
-        val curr_step = abs(t_step.toInt() - pre_step.toInt()).toString()
-        binding.walk.text = curr_step.toString()
-        binding.burn.text = (round(curr_step.toFloat() * 0.04).toInt()).toString()
-        val cpbar = binding.circularProgressBar
-        cpbar.progress = curr_step.toFloat()
-        val burnprobar = binding.burnCal
-        burnprobar.progress = ((round(curr_step.toFloat() * 0.04).toInt()).toFloat())
-        burnprobar.setOnClickListener {
-            Toast.makeText(requireContext(), "Long press to set target", Toast.LENGTH_SHORT).show()
-        }
-    }
-
-    fun addTarget() {
-        dialog.setContentView(R.layout.pop_weight)
-        val burn_target: NumberPicker = dialog.findViewById(R.id.loss)
-        val add: AppCompatButton = dialog.findViewById(R.id.add)
-        val save_burn = Constant.loadData(requireContext(), "calorie", "burn", "100").toString()
-        burn_target.minValue = 0
-        burn_target.maxValue = 14
-        burn_target.wrapSelectorWheel = true
-        burn_target.displayedValues = Constant.calorieburn
-        val burn_cal = binding.burnCal
-        burn_cal.progressMax = save_burn.toFloat()
-        burn_cal.setOnLongClickListener {
-            dialog.show()
-            val save = Constant.loadData(requireContext(), "calorie", "burn", "100").toString()
-            burn_target.value = Constant.calorieburn.indexOf(save)
-            true
-        }
-        add.setOnClickListener {
-            Constant.savedata(
-                requireContext(),
-                "calorie",
-                "burn",
-                Constant.calorieburn[burn_target.value]
-            )
-            burn_cal.progressMax = Constant.calorieburn[burn_target.value].toFloat()
-            dialog.dismiss()
-        }
-    }
-
-    fun getenergy() {
-        val cal = binding.calorie
-        val cal_meter = binding.calMeter
-        val ViewModel = ViewModelProvider(this)[Food_ViewModel::class.java]
-        val target=Constant.loadData(requireContext(), "calorie", "target", "100").toString().toFloat()
-        cal_meter.progressMax=target
-        binding.targetCal.text=target.toString()
-        ViewModel.calories.observe(viewLifecycleOwner) { nutrients ->
-            val total = nutrients.sum()
-            if (total > target) {
-                cal_meter.progressBarColor = Color.RED
-            } else {
-                cal_meter.progressBarColor = Color.YELLOW
-            }
-            cal.text = total.toString()
-            cal_meter.progress = total.toFloat()
-        }
-
-        ViewModel.getCalories()
-
-    }
-
-    fun Getlatestweight() {
-        binding.weight.text =
-            Constant.loadData(requireContext(), "weight", "curr_w", "").toString()
-        binding.target.text = Constant.loadData(requireContext(), "weight", "loss", "0").toString()
     }
 }
